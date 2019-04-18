@@ -28,6 +28,7 @@ Then run ```install```.\
 \
 \
 You are done !
+\
 ## Run the program
 First open the Anaconda prompt as an admin, then set the project folder as the current working directory.\
 \
