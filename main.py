@@ -47,7 +47,7 @@ app.layout = html.Div([
             html.P('- Windows'),
             html.P('- Anaconda'),
             dcc.Markdown('\- A [gurobi licence](https://www.gurobi.com/documentation/8.1/quickstart_mac/retrieving_a_free_academic.html#subsection:academiclicense)')],
-            style={'margin-left':'30px', 'font-size':'1.8rem'}),
+            style={'margin-left':'30px'}),
         html.H4('Upload here the project excel and the students choices excel', style={'margin-left':'10px', 'margin-top':'30px', 'color':'#3BA071'}),
         dcc.Upload(
             id='upload-projects',
@@ -94,7 +94,8 @@ app.layout = html.Div([
         html.Br(),
         html.Div([html.P('Results are in the folder :', style={'float':'left', 'margin-right':'10px'}),
                   html.P(str(path), style={'text-decoration':'underline'})]),
-        html.H4('Distribution of the assignments', style={'margin-top':'20px', 'color':'#3BA071'}),
+        html.H4('Distribution of the assignments', style={'margin-top':'20px', 'margin-bottom':'10px', 'color':'#3BA071'}),
+        html.P('No output yet', id='error-out'),
         dcc.Graph(id='hist_affe', figure={
                                          'data': [
                                                  {'x': ['1st choice', '2nd choice', '3rd choice', '4th choice', 'Other affectation'],
@@ -162,9 +163,11 @@ def draw_hist(project):
         return figure
     return {'data': [{'x': ['1st choice', '2nd choice', '3rd choice', '4th choice'], 'y': [0, 0, 0, 0], 'type': 'bar', 'name': 'Distribution'}]}
 
-@app.callback(Output('hist_affe', 'figure'),
-             [Input('go-button', 'n_clicks'),
-              Input('projects-checkboxes', 'children')])
+@app.callback([Output('hist_affe', 'figure'),
+               Output('error-out', 'children'),
+               Output('error-out', 'style')],
+              [Input('go-button', 'n_clicks'),
+               Input('projects-checkboxes', 'children')])
 def compute(n_clicks, table):
     if df_choices is not None and df_projects is not None and n_clicks is not None:
         
@@ -205,35 +208,46 @@ def compute(n_clicks, table):
                 model.addConstr(O[j] == 1, "c6_" + str(j))
         model.update()
         
-        model.optimize()
+        try:
         
-        affectations = np.zeros((n,p), dtype='uint8')
-        for (i, j), v in a.items():
-            affectations[i, j] = np.abs(v.x)
-        affectations = np.array(project_list)[np.argwhere(affectations == 1)[:,1]]
+            model.optimize()
+            
+            affectations = np.zeros((n,p), dtype='uint8')
+            for (i, j), v in a.items():
+                affectations[i, j] = np.abs(v.x)
+            affectations = np.array(project_list)[np.argwhere(affectations == 1)[:,1]]
+            
+            y = np.zeros(5, dtype='int32')
+            for i, choices in enumerate(df_choices.values[:,-4:]):
+                for j, choice in enumerate(choices):
+                    if affectations[i] == choice:
+                        y[j] += 1
+                        break
+            y[4] = n - y.sum()
+            
+            data = np.concatenate((df_choices['Nom'].values.reshape(n, 1),
+                                   df_choices['Prenom'].values.reshape(n, 1),
+                                   affectations.reshape(n, 1)), axis=1)
+            
+            df = pd.DataFrame(data, columns=['Nom', 'Prénom', 'Projet'])
+            df.sort_values(['Nom', 'Prénom'], ascending=[1, 1], inplace=True)
+            df.to_excel(os.path.join(path, 'results.xlsx'), index=False)
         
-        y = np.zeros(5, dtype='int32')
-        for i, choices in enumerate(df_choices.values[:,-4:]):
-            for j, choice in enumerate(choices):
-                if affectations[i] == choice:
-                    y[j] += 1
-        y[4] = n - y.sum()
-        
-        data = np.concatenate((df_choices['Nom'].values.reshape(n, 1),
-                               df_choices['Prenom'].values.reshape(n, 1),
-                               affectations.reshape(n, 1)), axis=1)
-        
-        pd.DataFrame(data, columns=['Nom', 'Prénom', 'Projet']).to_excel(os.path.join(path, 'results.xlsx'), index=False)
+        except:
+            return {'data': [
+                            {'x': ['1st choice', '2nd choice', '3rd choice', '4th choice', 'Other affectation'],
+                             'y': [0, 0, 0, 0, 0], 'type': 'bar', 'name': 'Affectations'}
+                            ]}, 'This is not feasable (' + str(n_clicks) + ')', {'color':'#C13636'}
         
         return {'data': [
                         {'x': ['1st choice', '2nd choice', '3rd choice', '4th choice', 'Other affectation'],
                          'y': y, 'type': 'bar', 'name': 'Affectations'}
-                        ]}
+                        ]}, 'Solution found (' + str(n_clicks) + ')', {'color':'#3BA071'}
     
     return {'data': [
                     {'x': ['1st choice', '2nd choice', '3rd choice', '4th choice', 'Other affectation'],
                      'y': [0, 0, 0, 0, 0], 'type': 'bar', 'name': 'Affectations'}
-                    ]}
+                    ]}, 'No output yet', None
 
 @app.callback(Output('cout-choix-1', 'step'),
              [Input('cout-choix-1', 'value')])
